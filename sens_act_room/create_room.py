@@ -1,18 +1,22 @@
 import json
-import datetime
 import random
-import time
 import hashlib
 import requests
-import os.path
 import sys
 from kafka import KafkaProducer
-
+from sensors import *
+from actuators import *
 
 
 ################################################################################
+'''
+main method has to be launched when a new room is instantiated, so for each room there is a generated stream
 
-#TODO make the two classes thread safe, so they do not stuck the cpu
+    usage : python3 create_room.py  -l #address [ [-s #sens -a #act]  -p || --path #actuator-filename --name || -n #room-name]
+
+'''
+#TODO names refactoring and fix this _default_path not needed here! just move some params
+_default_path = "actuators_room.txt"
 
 #NOTE #1
 #this module create a file [in a hardwired path or a custom one] where there are couple k:V where k=[Actuator ID]  and v=[Actuator current value]
@@ -26,18 +30,22 @@ from kafka import KafkaProducer
 #this module is almost self-contained, whenever a real env is available one should only write the connection to a kafka broker or message queue part.
 
 #########################CONSTANTS##############################################
+
+google_maps_url = "https://maps.googleapis.com/maps/api/geocode/json?address="
+_config_file_json = "config.json"
 min_time_w = 1
 max_time_w = 6
-google_maps_url = 'https://maps.googleapis.com/maps/api/geocode/json?address='
-_default_path = "actuators_room.txt"
-_room_name = ""
 __air_default_sensor = 2.0
 __temp_default_sensor = 2.0
 __light_default_sensor = 2.0
 __air_default_actuator = 2.0
 __temp_default_actuator = 2.0
 __light_default_actuator = 2.0
+__n_sensors_default = 10
+__n_actuators_defalut = 5
 floating_s = 1.0
+
+############################### used ADT #######################################
 
 actual_sensors_level = {"air":__air_default_sensor,"temp":__temp_default_sensor,"light":__light_default_sensor}
 actual_actuators_level = {"air":__air_default_actuator,"temp":__temp_default_actuator,"light":__light_default_actuator}
@@ -59,82 +67,6 @@ class RoomProducer:
 
 
 
-############################### Sensor Class ###################################
-class Sensor:
-    'the count of all the sensors present in the room'
-    all_sensors = 0
-
-    def __init__(self, type, location):
-        self.type = type
-        self.location = location
-        self.id = type+location+str(Sensor.all_sensors)
-        Sensor.all_sensors+=1
-        print("Created Sensor "+self.id)
-
-    def get_value(self):
-        #this will update the value for the current sensor
-        value = random.uniform(actual_sensors_level[self.type]-floating_s , actual_sensors_level[self.type]+ floating_s )
-        actual_sensors_level[self.type] = value
-        return value
-
-    def push_value(self):
-        #this pack and push the message and then pasue for a random time
-        ts = datetime.datetime.now().timestamp()
-        message = {'Type':self.type, 'Value':self.get_value(), 'Timestamp':ts, 'Id':self.id, 'Location':  self.location}
-        message=json.dumps(message)
-        time.sleep(random.randint(min_time_w , max_time_w ))
-        print(message)
-        return message
-
-
-################################################################################
-############################# Actuators Class ##################################
-
-class Actuator:
-        'the count of all the actuators present in the room'
-        all_actuators = 0
-
-        def __init__(self, type, location, actuators_filename=_default_path):
-            self.type = type
-            self.location = location
-            self.id = type+location+str(Actuator.all_actuators)
-            if os.path.isfile(actuators_filename):
-                lines = [line.rstrip('\n') for line in open(actuators_filename)]
-                for line in lines:
-                    curr_id = line.split(":")[0]
-                    if curr_id == self.id :
-                        print("Actuator "+self.id+" alreay exist. ERROR")
-                        del self
-                        return
-                with open(actuators_filename, "a") as myfile:
-                    #TODO fix this the default value of the actuator
-                    myfile.write(self.id+":2.0\n")
-            print("Created Actuator "+self.id)
-            Actuator.all_actuators+=1
-
-        def __del__(self):
-            class_name = self.__class__.__name__
-            #print( class_name, "destroyed")
-
-        def get_value(self):
-            # this get the current value of the Actuator
-            return actual_actuators_level[self.type]
-
-        def set_value(self, value):
-            # this set the acutator value to value
-            actual_actuators_level[self.type] = value
-
-        def get_input(self, actuators_filename=_default_path):
-            # this get an external input : a value in a file in the form Actuator_ID:value
-            #since the actuator number is limited it will not affect the performances
-            if os.path.isfile(actuators_filename):
-                lines = [line.rstrip('\n') for line in open(actuators_filename)]
-                for line in lines:
-                    curr_id,value = line.split(":")
-                    if curr_id == self.id :
-                        if value != actual_actuators_level[self.type]:
-                            self.set_value(value)
-
 ################################################################################
 ######################### Room function ########################################
 
@@ -154,22 +86,33 @@ def mock_changes():
             prev_a[type] = actual_actuators_level[type]
 
 
-
-def start_room(n_sensors, n_actuators, address, producer, actuators_filename = _default_path):
-    open( actuators_filename , 'w')
+def get_sensors_list(n_sensors ):
     sensors_list=[0]*n_sensors
-    actuators_list=[0]*n_actuators
-    location = get_location( address )
     for i in range(0,n_sensors):
         type=types_list[random.randint(0,n_sensors)%3]
         sensors_list[i] = Sensor(type, location)
+    return sensors_list
+
+
+def get_actuators_list(n_actuators ):
+    actuators_list=[0]*n_actuators
     for k in range(0,n_actuators):
         type = types_list[random.randint(0,n_actuators)%3]
         actuators_list[k] = Actuator(type, location, actuators_filename)
+    return actuators_list
+
+def start_room(location, producer, actuators_filename = _default_path,
+                                    n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
+    open( actuators_filename , 'w')
+    sensors_list = get_sensors_list( n_sensors )
+    actuators_list = get_actuators_list( n_actuators )
     j = 0
     l = 0
     while True:
         producer.send_message( sensors_list[j].push_value() )
+        #TODO
+        return
+
         actuators_list[l].get_input()
         j += 1
         l += 1
@@ -182,7 +125,7 @@ def start_room(n_sensors, n_actuators, address, producer, actuators_filename = _
 
 
 def print_usage():
-    print("\nusage: python3 create_room.py -s #sens -a #act -l #address [--path or -p #actuator-filename -n or --name #room-name]\n")
+    print("\nusage: python3 create_room.py  -l #address [ [-s #sens -a #act] --path or -p #actuator-filename -n or --name #room-name]\n")
 
 
 def is_int(value):
@@ -195,11 +138,11 @@ def is_int(value):
 
 def main():
     #command line parsing
-    if "-s" not in sys.argv or "-a" not in sys.argv or "-l" not in sys.argv:
+    if "-l" not in sys.argv:
         print_usage()
         return
-    n_sensors=0
-    n_actuators=0
+    n_sensors=None
+    n_actuators=None
     address=""
     actuators_filename=_default_path
     for i in range(1,len(sys.argv)):
@@ -210,11 +153,16 @@ def main():
             else:
                 print_usage()
                 return
-        if param == "-a" :
-            if is_int(sys.argv[i+1]):
-                n_actuators=int(sys.argv[i+1])
+        if param == "-a":
+            if "-s" in sys.argv:
+                if is_int(sys.argv[i+1]):
+                    n_actuators=int(sys.argv[i+1])
+                else :
+                    print_usage()
+                    return
             else :
                 print_usage()
+                print("NOTE: cannot be indicated the actuators and not the sensors")
                 return
         if param == "-l" :
             address=sys.argv[i+1]
@@ -222,20 +170,18 @@ def main():
             actuators_filename=sys.argv[i+1]
         if param == "-n" or param == "--name":
             _room_name =sys.argv[i+1]
+    #take config params
+    with open(_config_file_json) as f:
+        config = json.load(f)
     #start program
-    _room_name = str(n_sensors)+":"+str(n_actuators)+":"+address.replace(" ", "")
+    _room_name = config["ROOM_NAME"]
     print("Room "+_room_name+" created!")
-    #TODO instead of test should be some meaningful name as room name but i can't rn create a topic from code
-    producer = RoomProducer("localhost:9092","test")
-    start_room(n_sensors, n_actuators, address, producer, actuators_filename)
+    location = get_location( address )
+    #default is "MyEnv"
+    TOPIC_NAME_S = location+_room_name
+    producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
+    start_room( address, producer, actuators_filename, n_sensors, n_actuators)
 
 
 if __name__ == "__main__":
     main()
-
-'''
-main method has to be launched when a new room is instantiated, so for each room there is a generate stream
-
-    usage : python3 create_room.py -s #sens -a #act -l #address [-p || --path #actuator-filename --name || -n #room-name]
-
-'''
