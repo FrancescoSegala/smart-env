@@ -3,12 +3,16 @@ import os.path
 
 _default_path = "actuators_room.txt"
 
+default_values_a = {"air":2.0 , "temp":2.0 , "light":2.0}
+
 
 ############################# Actuators Class ##################################
 
 class Actuator:
         'the count of all the actuators present in the room'
         all_actuators = 0
+        actuators_level = {}
+
 
         def __init__(self, type, location, actuators_filename=_default_path):
             self.type = type
@@ -22,9 +26,9 @@ class Actuator:
                         print("Actuator "+self.id+" alreay exist. ERROR")
                         del self
                         return
+                Actuator.actuators_level[self.id] = default_values_a[self.type]
                 with open(actuators_filename, "a") as myfile:
-                    #TODO fix this the default value of the actuator
-                    myfile.write(self.id+":2.0\n")
+                    myfile.write(self.id+":"+str(default_values_a[self.type])+"\n")
             print("Created Actuator "+self.id)
             Actuator.all_actuators+=1
 
@@ -34,11 +38,11 @@ class Actuator:
 
         def get_value(self):
             # this get the current value of the Actuator
-            return actual_actuators_level[self.type]
+            return Actuator.actuators_level[self.id]
 
         def set_value(self, value):
             # this set the acutator value to value
-            actual_actuators_level[self.type] = value
+            Actuator.actuators_level[self.id] = value
 
         def get_input(self, actuators_filename=_default_path):
             # this get an external input : a value in a file in the form Actuator_ID:value
@@ -48,7 +52,7 @@ class Actuator:
                 for line in lines:
                     curr_id,value = line.split(":")
                     if curr_id == self.id :
-                        if value != actual_actuators_level[self.type]:
+                        if value != Actuator.actuators_level[self.id]:
                             self.set_value(value)
 
 ################################################################################

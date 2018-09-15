@@ -15,8 +15,10 @@ main method has to be launched when a new room is instantiated, so for each room
     usage : python3 create_room.py  -l #address [ [-s #sens -a #act]  -p || --path #actuator-filename --name || -n #room-name]
 
 '''
-#TODO names refactoring and fix this _default_path not needed here! just move some params
+#TODO #1 names refactoring and fix this _default_path not needed here! just move some params
 _default_path = "actuators_room.txt"
+#TODO #2 embedd the number of sensors and the number of actuators elsewhere
+
 
 #NOTE #1
 #this module create a file [in a hardwired path or a custom one] where there are couple k:V where k=[Actuator ID]  and v=[Actuator current value]
@@ -33,22 +35,12 @@ _default_path = "actuators_room.txt"
 
 google_maps_url = "https://maps.googleapis.com/maps/api/geocode/json?address="
 _config_file_json = "config.json"
-min_time_w = 1
-max_time_w = 6
-__air_default_sensor = 2.0
-__temp_default_sensor = 2.0
-__light_default_sensor = 2.0
-__air_default_actuator = 2.0
-__temp_default_actuator = 2.0
-__light_default_actuator = 2.0
+
 __n_sensors_default = 10
 __n_actuators_defalut = 5
-floating_s = 1.0
 
-############################### used ADT #######################################
+actual_actuators_level = {}
 
-actual_sensors_level = {"air":__air_default_sensor,"temp":__temp_default_sensor,"light":__light_default_sensor}
-actual_actuators_level = {"air":__air_default_actuator,"temp":__temp_default_actuator,"light":__light_default_actuator}
 types_list = ["air","temp","light"]
 
 ############################### Kafka Producer Class ###########################
@@ -77,16 +69,21 @@ def get_location(address):
 
 
 
-def mock_changes():
+def mock_changes(sensors_list , actuators_list):
     #this method fakes the environment, so if an actuator is set it will influence the value given by the sensors
     prev_a = {"air":actual_actuators_level["air"],"temp":actual_actuators_level["temp"],"light":actual_actuators_level["light"]}
+    #take the actual value before the actuators_ change
     for type in types_list:
-        if actual_actuators_level[type] != prev_a[type]:
-            actual_sensors_level[type] += ( actual_sensors_level[type] - actual_actuators_level[type] )
-            prev_a[type] = actual_actuators_level[type]
+        for actuator in actuators_list:
+            #if an actuator change a value then update the sensors related to that type
+            if  actuator.type == type and Actuator.actuators_level[actuator.id] != prev_a[type] :
+                prev_a[type] = Actuator.actuators_level[actuator.id]
+                for sensor in sensors_list:
+                    if sensor.type == type :
+                        Sensor.sensors_level[sensor.id] += ( Sensor.sensors_level[sensor.id] - Actuator.actuators_level[actuator.id] )
 
 
-def get_sensors_list(n_sensors ):
+def get_sensors_list(n_sensors , location ):
     sensors_list=[0]*n_sensors
     for i in range(0,n_sensors):
         type=types_list[random.randint(0,n_sensors)%3]
@@ -94,31 +91,32 @@ def get_sensors_list(n_sensors ):
     return sensors_list
 
 
-def get_actuators_list(n_actuators ):
+def get_actuators_list(n_actuators , location ):
     actuators_list=[0]*n_actuators
     for k in range(0,n_actuators):
         type = types_list[random.randint(0,n_actuators)%3]
-        actuators_list[k] = Actuator(type, location, actuators_filename)
+        actuator = Actuator(type, location)
+        actuators_list[k] = actuator
+        actual_actuators_level[actuator.type] = actuator.get_value()
     return actuators_list
 
 def start_room(location, producer, actuators_filename = _default_path,
                                     n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
     open( actuators_filename , 'w')
-    sensors_list = get_sensors_list( n_sensors )
-    actuators_list = get_actuators_list( n_actuators )
+    sensors_list = get_sensors_list( n_sensors , location )
+    actuators_list = get_actuators_list( n_actuators , location )
     j = 0
     l = 0
     while True:
         producer.send_message( sensors_list[j].push_value() )
-        #TODO
-        return
-
         actuators_list[l].get_input()
         j += 1
         l += 1
         j = j % n_sensors
         l = l % n_actuators
-        mock_changes()
+        if l == 0
+            #perform the changes periodically every time all the actuators have been scanned 
+            mock_changes(sensors_list, actuators_list)
 
 
 ################################################################################
@@ -141,10 +139,10 @@ def main():
     if "-l" not in sys.argv:
         print_usage()
         return
-    n_sensors=None
-    n_actuators=None
+    n_sensors=__n_sensors_default
+    n_actuators=__n_actuators_defalut
     address=""
-    actuators_filename=_default_path
+    actuators_filename= _default_path
     for i in range(1,len(sys.argv)):
         param = sys.argv[i]
         if param == "-s" :
@@ -180,7 +178,7 @@ def main():
     #default is "MyEnv"
     TOPIC_NAME_S = location+_room_name
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
-    start_room( address, producer, actuators_filename, n_sensors, n_actuators)
+    start_room( location, producer, actuators_filename, n_sensors, n_actuators)
 
 
 if __name__ == "__main__":
