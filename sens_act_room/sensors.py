@@ -1,24 +1,33 @@
 import json
 import time
 import datetime
+import random
 
+
+default_values_s = {"air":2.0 , "temp":2.0 , "light":2.0 }
+floating_s = 1.0
+min_time_w = 1
+max_time_w = 6
 
 ############################### Sensor Class ###################################
 class Sensor:
     'the count of all the sensors present in the room'
     all_sensors = 0
+    sensors_level = {}
 
     def __init__(self, type, location):
         self.type = type
         self.location = location
         self.id = type+location+str(Sensor.all_sensors)
+        Sensor.sensors_level[self.id] = default_values_s[type]
         Sensor.all_sensors+=1
         print("Created Sensor "+self.id)
 
+
     def get_value(self):
         #this will update the value for the current sensor
-        value = random.uniform(actual_sensors_level[self.type]-floating_s , actual_sensors_level[self.type]+ floating_s )
-        actual_sensors_level[self.type] = value
+        value = random.uniform(Sensor.sensors_level[self.id]-floating_s , Sensor.sensors_level[self.id]+ floating_s )
+        Sensor.sensors_level[self.id] = value
         return value
 
     def push_value(self):
