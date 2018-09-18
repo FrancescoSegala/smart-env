@@ -39,7 +39,7 @@ _config_file_json = "config.json"
 __n_sensors_default = 10
 __n_actuators_defalut = 5
 
-actual_actuators_level = {}
+actual_actuators_level = {"air":0.0,"temp":0.0,"light":0.0}
 
 types_list = ["air","temp","light"]
 
@@ -80,7 +80,10 @@ def mock_changes(sensors_list , actuators_list):
                 prev_a[type] = Actuator.actuators_level[actuator.id]
                 for sensor in sensors_list:
                     if sensor.type == type :
-                        Sensor.sensors_level[sensor.id] += ( Sensor.sensors_level[sensor.id] - Actuator.actuators_level[actuator.id] )
+                        var = [-1,1]
+                        r = var[random.randint(0,1)]
+                        Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - Actuator.actuators_level[actuator.id] )
+                        print("Env condition changed")
 
 
 def get_sensors_list(n_sensors , location ):
@@ -114,8 +117,8 @@ def start_room(location, producer, actuators_filename = _default_path,
         l += 1
         j = j % n_sensors
         l = l % n_actuators
-        if l == 0
-            #perform the changes periodically every time all the actuators have been scanned 
+        if l == 0:
+            #perform the changes periodically every time all the actuators have been scanned
             mock_changes(sensors_list, actuators_list)
 
 
@@ -176,7 +179,8 @@ def main():
     print("Room "+_room_name+" created!")
     location = get_location( address )
     #default is "MyEnv"
-    TOPIC_NAME_S = location+_room_name
+    #TOPIC_NAME_S = location+_room_name
+    TOPIC_NAME_S = "jacopino"
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
     start_room( location, producer, actuators_filename, n_sensors, n_actuators)
 

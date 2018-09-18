@@ -53,6 +53,6 @@ class Actuator:
                     curr_id,value = line.split(":")
                     if curr_id == self.id :
                         if value != Actuator.actuators_level[self.id]:
-                            self.set_value(value)
+                            self.set_value(float(value))
 
 ################################################################################

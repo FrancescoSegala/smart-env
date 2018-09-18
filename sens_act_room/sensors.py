@@ -4,7 +4,7 @@ import datetime
 import random
 
 
-default_values_s = {"air":2.0 , "temp":2.0 , "light":2.0 }
+default_values_s = {"air":5.0 , "temp":20.0 , "light":1.6 }
 floating_s = 1.0
 min_time_w = 1
 max_time_w = 6
@@ -26,7 +26,12 @@ class Sensor:
 
     def get_value(self):
         #this will update the value for the current sensor
-        value = random.uniform(Sensor.sensors_level[self.id]-floating_s , Sensor.sensors_level[self.id]+ floating_s )
+        incr = floating_s
+        if self.type == "light":
+            incr = 0.2
+        value = random.uniform(Sensor.sensors_level[self.id]-incr , Sensor.sensors_level[self.id]+ incr )
+        if value < 0 and self.type == "light":
+            value += 0.2
         Sensor.sensors_level[self.id] = value
         return value
 

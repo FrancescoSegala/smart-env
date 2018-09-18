@@ -1,5 +1,4 @@
 {
   "BROKER_HOST":"localhost:9093",
   "ROOM_NAME" :  "MyEnv"
-
 }
