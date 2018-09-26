@@ -1,5 +1,5 @@
-tempChIJv2S9UnVjLxMRcpEQDm7o8Fo0:2.0
-lightChIJv2S9UnVjLxMRcpEQDm7o8Fo1:2.0
-airChIJv2S9UnVjLxMRcpEQDm7o8Fo2:2.0
-tempChIJv2S9UnVjLxMRcpEQDm7o8Fo3:2.0
-lightChIJv2S9UnVjLxMRcpEQDm7o8Fo4:2.0
+air_via_ariosto_250:2.0
+light_via_ariosto_251:2.0
+air_via_ariosto_252:2.0
+light_via_ariosto_253:2.0
+temp_via_ariosto_254:2.0

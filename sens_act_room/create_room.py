@@ -3,10 +3,10 @@ import random
 import hashlib
 import requests
 import sys
+import threading, Queue
 from kafka import KafkaProducer
 from sensors import *
 from actuators import *
-
 
 ################################################################################
 '''
@@ -26,7 +26,7 @@ _default_path = "actuators_room.txt"
 #it will produce the same result, however this a mock for real sensors and in real application this value is bounded inside the actuator so close
 
 #NOTE #2
-#the method create_room start some sensors and actuators
+#the method create_room start some sensors and actuators and push the sensor value to the kafka broker registered in _config_file_json
 
 #NOTE #3
 #this module is almost self-contained, whenever a real env is available one should only write the connection to a kafka broker or message queue part.
@@ -63,9 +63,17 @@ class RoomProducer:
 ######################### Room function ########################################
 
 def get_location(address):
-    response = requests.get(google_maps_url+address)
-    resp_json_payload = response.json()
-    return resp_json_payload["results"][0]["place_id"]
+    #response = requests.get(google_maps_url+address)
+    #resp_json_payload = response.json()
+    #print(resp_json_payload)
+    #return resp_json_payload["results"][0]["place_id"]
+    return "_"+address.rstrip().replace(" ", "_")
+
+
+#NOTE
+#in order to use google maps API over the limit of usage you need to register your billing address [I have not RN]
+# when i am able to get one just uncomment the get_location() function
+
 
 
 
@@ -76,13 +84,13 @@ def mock_changes(sensors_list , actuators_list):
     for type in types_list:
         for actuator in actuators_list:
             #if an actuator change a value then update the sensors related to that type
-            if  actuator.type == type and Actuator.actuators_level[actuator.id] != prev_a[type] :
-                prev_a[type] = Actuator.actuators_level[actuator.id]
+            if  actuator.type == type and actuator.get_value() != prev_a[type] :
+                prev_a[type] = actuator.get_value()
                 for sensor in sensors_list:
                     if sensor.type == type :
                         var = [-1,1]
                         r = var[random.randint(0,1)]
-                        Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - Actuator.actuators_level[actuator.id] )
+                        Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - acutator.get_value() )
                         print("Env condition changed")
 
 
@@ -112,7 +120,9 @@ def start_room(location, producer, actuators_filename = _default_path,
     l = 0
     while True:
         producer.send_message( sensors_list[j].push_value() )
+        #TODO get lock on file
         actuators_list[l].get_input()
+        #TODO release lock on file
         j += 1
         l += 1
         j = j % n_sensors
@@ -146,6 +156,10 @@ def main():
     n_actuators=__n_actuators_defalut
     address=""
     actuators_filename= _default_path
+    #take config params
+    with open(_config_file_json) as f:
+        config = json.load(f)
+    _room_name = config["ROOM_NAME"]
     for i in range(1,len(sys.argv)):
         param = sys.argv[i]
         if param == "-s" :
@@ -171,16 +185,13 @@ def main():
             actuators_filename=sys.argv[i+1]
         if param == "-n" or param == "--name":
             _room_name =sys.argv[i+1]
-    #take config params
-    with open(_config_file_json) as f:
-        config = json.load(f)
     #start program
-    _room_name = config["ROOM_NAME"]
     print("Room "+_room_name+" created!")
     location = get_location( address )
     #default is "MyEnv"
     #TOPIC_NAME_S = location+_room_name
     TOPIC_NAME_S = "jacopino"
+    print("Use: ", TOPIC_NAME_S, " to bind the room to the server")
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
     start_room( location, producer, actuators_filename, n_sensors, n_actuators)
 
