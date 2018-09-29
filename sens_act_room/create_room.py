@@ -17,10 +17,6 @@ main method has to be launched when a new room is instantiated, so for each room
 
 '''
 
-
-#TODO #1 put sleep time in a config file
-
-
 #NOTE #1
 #this module create a file [in a hardwired path or a custom one] where there are couple k:V where k=[Actuator ID]  and v=[Actuator current value]
 #one on each line this because the value of the actuator shoul be bounded to the room created, is not advised to push the value "far" in a server
@@ -32,13 +28,17 @@ main method has to be launched when a new room is instantiated, so for each room
 #NOTE #3
 #this module is almost self-contained, whenever a real env is available one should only write the connection to a kafka broker or message queue part.
 
-#########################CONSTANTS##############################################
+######################### CONSTANTS & ATD ######################################
 
 google_maps_url = "https://maps.googleapis.com/maps/api/geocode/json?address="
 _config_file_json = "config.json"
 
 __n_sensors_default = 10
 __n_actuators_defalut = 5
+min_time_w = 1
+max_time_w = 6
+minute = 60
+
 
 types_list = ["air","temp","light"]
 
@@ -117,8 +117,8 @@ def get_location(address):
 def mock_changes_worker(actuators_id_list):
     #this method fakes the environment, so if an actuator is set it will influence the value given by the sensors
     prev = {}
-    #sleep to
-    time.sleep(30)
+    #sleep to wait for the room to setup
+    time.sleep( minute )
     for id in actuators_id_list:
         with x_lock:
             prev[id] = room_actuators[id].get_value()
@@ -137,14 +137,14 @@ def mock_changes_worker(actuators_id_list):
                             Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - curr_value )
                         print("Env condition changed")
                 prev[id] = curr_value
-        time.sleep(60)
+        time.sleep( 2 * minute )
 
 
 
 
 def get_sensors_list(n_sensors , location ):
     for i in range(0,n_sensors):
-        type=types_list[random.randint(0,n_sensors)%3]
+        type=types_list[random.randint(0,n_sensors)% len(types_list) ]
         sensor = Sensor(type, location)
         room_sensors[sensor.id] = sensor
 
@@ -152,7 +152,7 @@ def get_sensors_list(n_sensors , location ):
 
 def get_actuators_list(n_actuators , location ):
     for k in range(0,n_actuators):
-        type = types_list[random.randint(0,n_actuators)%3]
+        type = types_list[random.randint(0,n_actuators)% len(types_list)]
         actuator = Actuator(type, location)
         room_actuators[actuator.id] = actuator
 
@@ -171,7 +171,8 @@ def send_sensor_data_worker( producer):
         with x_lock:
             producer.send_message( room_sensors[sensor_ids[i]].push_value() )
             print ("sensor ", sensor_ids[i], "sent his data")
-        time.sleep(2)
+        #wait some random time before send another value    
+        time.sleep(random.randint(min_time_w , max_time_w ))
         i+=1
         i = i % n_sensors
 

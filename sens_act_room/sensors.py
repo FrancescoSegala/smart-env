@@ -6,8 +6,6 @@ import random
 
 default_values_s = {"air":5.0 , "temp":20.0 , "light":1.6 }
 floating_s = 1.0
-min_time_w = 1
-max_time_w = 6
 
 ############################### Sensor Class ###################################
 class Sensor:
@@ -40,8 +38,6 @@ class Sensor:
         ts = datetime.datetime.now().timestamp()
         message = {'Type':self.type, 'Value':self.get_value(), 'Timestamp':ts, 'Id':self.id, 'Location':  self.location}
         message=json.dumps(message)
-        #wait some seconds before send another value
-        time.sleep(random.randint(min_time_w , max_time_w ))
         print(message)
         return message
 
