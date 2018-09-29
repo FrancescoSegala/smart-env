@@ -3,7 +3,8 @@ import random
 import hashlib
 import requests
 import sys
-import threading, Queue
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from kafka import KafkaProducer
 from sensors import *
 from actuators import *
@@ -12,12 +13,12 @@ from actuators import *
 '''
 main method has to be launched when a new room is instantiated, so for each room there is a generated stream
 
-    usage : python3 create_room.py  -l #address [ [-s #sens -a #act]  -p || --path #actuator-filename --name || -n #room-name]
+    usage : python3 create_room.py  -l #address [ [-s #sens -a #act]  || -n #room-name]
 
 '''
-#TODO #1 names refactoring and fix this _default_path not needed here! just move some params
-_default_path = "actuators_room.txt"
-#TODO #2 embedd the number of sensors and the number of actuators elsewhere
+
+
+#TODO #1 put sleep time in a config file
 
 
 #NOTE #1
@@ -39,9 +40,13 @@ _config_file_json = "config.json"
 __n_sensors_default = 10
 __n_actuators_defalut = 5
 
-actual_actuators_level = {"air":0.0,"temp":0.0,"light":0.0}
-
 types_list = ["air","temp","light"]
+
+
+x_lock = threading.Lock()
+
+room_sensors = {}
+room_actuators = {}
 
 ############################### Kafka Producer Class ###########################
 
@@ -56,6 +61,39 @@ class RoomProducer:
         message_bytes = bytes(message, encoding='utf-8')
         self.producer.send(self._kafka_topic,value=message_bytes)
         self.producer.flush()
+
+
+
+################################################################################
+
+# HTTPRequestHandler class
+class actuatorHTTPrequestHandler(BaseHTTPRequestHandler):
+
+    # GET
+    def do_GET(self):
+        #path of the form: host/:id/:value
+        # Send response status code
+        self.send_response(200)
+        # Send headers
+        self.send_header('Content-type','text/html')
+        self.end_headers()
+        path = self.path.split("/")
+        if len(path) < 3 :
+            self.wfile.write(bytes("invalid format", "utf8"))
+            return
+        id = path[1]
+        value = path[2]
+        if id not in list(room_actuators.keys()):
+            self.wfile.write(bytes("invalid id", "utf8"))
+        message = "value Updated"
+        if update_actuator(id, value):
+            print("actuator ", id, " value changed to ", value)
+            # Send message back to client
+        else :
+            message = "cannot update id "+ id
+        # Write content as utf-8 data
+        self.wfile.write(bytes(message, "utf8"))
+        return
 
 
 
@@ -76,67 +114,99 @@ def get_location(address):
 
 
 
-
-def mock_changes(sensors_list , actuators_list):
+def mock_changes_worker(actuators_id_list):
     #this method fakes the environment, so if an actuator is set it will influence the value given by the sensors
-    prev_a = {"air":actual_actuators_level["air"],"temp":actual_actuators_level["temp"],"light":actual_actuators_level["light"]}
-    #take the actual value before the actuators_ change
-    for type in types_list:
-        for actuator in actuators_list:
-            #if an actuator change a value then update the sensors related to that type
-            if  actuator.type == type and actuator.get_value() != prev_a[type] :
-                prev_a[type] = actuator.get_value()
-                for sensor in sensors_list:
+    prev = {}
+    #sleep to
+    time.sleep(30)
+    for id in actuators_id_list:
+        with x_lock:
+            prev[id] = room_actuators[id].get_value()
+    while True:
+        for id in actuators_id_list:
+            with x_lock:
+                curr_value = room_actuators[id].get_value()
+                type = room_actuators[id].type
+            if curr_value != prev[id]:
+                #change in sensor value for the type
+                for sensor in list(room_sensors.values()):
                     if sensor.type == type :
                         var = [-1,1]
                         r = var[random.randint(0,1)]
-                        Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - acutator.get_value() )
+                        with x_lock:
+                            Sensor.sensors_level[sensor.id] += r*abs( Sensor.sensors_level[sensor.id] - curr_value )
                         print("Env condition changed")
+                prev[id] = curr_value
+        time.sleep(60)
+
+
 
 
 def get_sensors_list(n_sensors , location ):
-    sensors_list=[0]*n_sensors
     for i in range(0,n_sensors):
         type=types_list[random.randint(0,n_sensors)%3]
-        sensors_list[i] = Sensor(type, location)
-    return sensors_list
+        sensor = Sensor(type, location)
+        room_sensors[sensor.id] = sensor
+
 
 
 def get_actuators_list(n_actuators , location ):
-    actuators_list=[0]*n_actuators
     for k in range(0,n_actuators):
         type = types_list[random.randint(0,n_actuators)%3]
         actuator = Actuator(type, location)
-        actuators_list[k] = actuator
-        actual_actuators_level[actuator.type] = actuator.get_value()
-    return actuators_list
+        room_actuators[actuator.id] = actuator
 
-def start_room(location, producer, actuators_filename = _default_path,
-                                    n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
-    open( actuators_filename , 'w')
-    sensors_list = get_sensors_list( n_sensors , location )
-    actuators_list = get_actuators_list( n_actuators , location )
-    j = 0
-    l = 0
+
+def update_actuator(id, value):
+    with x_lock:
+        room_actuators[id].set_value(float(value))
+    return True
+
+
+def send_sensor_data_worker( producer):
+    sensor_ids = list(room_sensors.keys())
+    n_sensors = len(sensor_ids)
+    i=0
     while True:
-        producer.send_message( sensors_list[j].push_value() )
-        #TODO get lock on file
-        actuators_list[l].get_input()
-        #TODO release lock on file
-        j += 1
-        l += 1
-        j = j % n_sensors
-        l = l % n_actuators
-        if l == 0:
-            #perform the changes periodically every time all the actuators have been scanned
-            mock_changes(sensors_list, actuators_list)
+        with x_lock:
+            producer.send_message( room_sensors[sensor_ids[i]].push_value() )
+            print ("sensor ", sensor_ids[i], "sent his data")
+        time.sleep(2)
+        i+=1
+        i = i % n_sensors
 
+def http_actuator_server_worker(host, port):
+  print('starting http actuator server...')
+  # Choose port 8080, for port 80, which is normally used for a http server, you need root access
+  server_address = (host, port)
+  httpd = HTTPServer(server_address, actuatorHTTPrequestHandler)
+  print('running  http actuator server...')
+  httpd.serve_forever()
+
+
+def start_room(location, producer, http_server_host ,
+                                    n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
+    get_sensors_list( n_sensors , location )
+    get_actuators_list( n_actuators , location )
+    actuator_ids = list(room_actuators.keys())
+    sensor_thread = threading.Thread(target=send_sensor_data_worker, args=(producer,))
+    sensor_thread.start()
+    host = http_server_host.split(":")
+    hostname = host[0]
+    port = int(host[1])
+    actuator_thread = threading.Thread(target=http_actuator_server_worker, args=(hostname,port,))
+    actuator_thread.start()
+    mock_changes_thread = threading.Thread(target=mock_changes_worker, args=(actuator_ids,))
+    mock_changes_thread.start()
+    sensor_thread.join()
+    actuator_thread.join()
+    mock_changes_thread.join()
 
 ################################################################################
 
 
 def print_usage():
-    print("\nusage: python3 create_room.py  -l #address [ [-s #sens -a #act] --path or -p #actuator-filename -n or --name #room-name]\n")
+    print("\nusage: python3 create_room.py  -l #address [ [-s #sens -a #act] -n or --name #room-name]\n")
 
 
 def is_int(value):
@@ -155,7 +225,6 @@ def main():
     n_sensors=__n_sensors_default
     n_actuators=__n_actuators_defalut
     address=""
-    actuators_filename= _default_path
     #take config params
     with open(_config_file_json) as f:
         config = json.load(f)
@@ -181,19 +250,18 @@ def main():
                 return
         if param == "-l" :
             address=sys.argv[i+1]
-        if param == "-p" or param=="--path":
-            actuators_filename=sys.argv[i+1]
         if param == "-n" or param == "--name":
             _room_name =sys.argv[i+1]
     #start program
     print("Room "+_room_name+" created!")
     location = get_location( address )
     #default is "MyEnv"
-    #TOPIC_NAME_S = location+_room_name
-    TOPIC_NAME_S = "jacopino"
+    TOPIC_NAME_S = location+_room_name
+    #TOPIC_NAME_S = "jacopino"
     print("Use: ", TOPIC_NAME_S, " to bind the room to the server")
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
-    start_room( location, producer, actuators_filename, n_sensors, n_actuators)
+    http_server_host = config["HTTP_SERVER_HOST"]
+    start_room( location, producer, http_server_host, n_sensors, n_actuators)
 
 
 if __name__ == "__main__":
