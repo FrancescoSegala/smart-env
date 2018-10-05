@@ -41,7 +41,7 @@ minute = 60
 
 
 types_list = ["air","temp","light"]
-
+kappa = {}
 
 x_lock = threading.Lock()
 
@@ -84,7 +84,9 @@ class actuatorHTTPrequestHandler(BaseHTTPRequestHandler):
         id = path[1]
         value = path[2]
         if id not in list(room_actuators.keys()):
+            print(list(room_actuators.keys()))
             self.wfile.write(bytes("invalid id", "utf8"))
+            return
         message = "value Updated"
         if update_actuator(id, value):
             print("actuator ", id, " value changed to ", value)
@@ -123,6 +125,7 @@ def mock_changes_worker(actuators_id_list):
         with x_lock:
             prev[id] = room_actuators[id].get_value()
     while True:
+        print( "checking room changes..." )
         for id in actuators_id_list:
             with x_lock:
                 curr_value = room_actuators[id].get_value()
@@ -149,11 +152,16 @@ def get_sensors_list(n_sensors , location ):
         room_sensors[sensor.id] = sensor
 
 
+def init_kappa():
+    with open(_config_file_json) as f:
+        config = json.load(f)
+    for k in config["KAPPA_VALUES"]:
+        kappa[k.lower()] = config["KAPPA_VALUES"][k]
 
 def get_actuators_list(n_actuators , location ):
     for k in range(0,n_actuators):
         type = types_list[random.randint(0,n_actuators)% len(types_list)]
-        actuator = Actuator(type, location)
+        actuator = Actuator(type, location, kappa[type])
         room_actuators[actuator.id] = actuator
 
 
@@ -170,8 +178,8 @@ def send_sensor_data_worker( producer):
     while True:
         with x_lock:
             producer.send_message( room_sensors[sensor_ids[i]].push_value() )
-            print ("sensor ", sensor_ids[i], "sent his data")
-        #wait some random time before send another value    
+            #print ("sensor ", sensor_ids[i], "sent his data")
+        #wait some random time before send another value
         time.sleep(random.randint(min_time_w , max_time_w ))
         i+=1
         i = i % n_sensors
@@ -187,6 +195,7 @@ def http_actuator_server_worker(host, port):
 
 def start_room(location, producer, http_server_host ,
                                     n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
+    init_kappa()
     get_sensors_list( n_sensors , location )
     get_actuators_list( n_actuators , location )
     actuator_ids = list(room_actuators.keys())
@@ -257,8 +266,8 @@ def main():
     print("Room "+_room_name+" created!")
     location = get_location( address )
     #default is "MyEnv"
-    TOPIC_NAME_S = location+_room_name
-    #TOPIC_NAME_S = "jacopino"
+    #TOPIC_NAME_S = location+_room_name
+    TOPIC_NAME_S = "jacopino"
     print("Use: ", TOPIC_NAME_S, " to bind the room to the server")
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
     http_server_host = config["HTTP_SERVER_HOST"]

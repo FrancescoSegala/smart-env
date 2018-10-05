@@ -1,5 +1,10 @@
 {
   "BROKER_HOST":"localhost:9093",
   "ROOM_NAME" :  "MyEnv",
-  "HTTP_SERVER_HOST" : "127.0.0.1:8080"
+  "HTTP_SERVER_HOST" : "127.0.0.1:8080",
+  "KAPPA_VALUES": {
+    "AIR" : 1,
+    "TEMP": 1.255,
+    "LIGHT": 25
+  }
 }

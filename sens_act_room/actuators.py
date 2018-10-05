@@ -1,8 +1,5 @@
 
-import os.path
-
-
-default_values_a = {"air":2.0 , "temp":2.0 , "light":2.0}
+default_values_a = {"air":5.0 , "temp":20.0 , "light":1.6 }
 
 
 ############################# Actuators Class ##################################
@@ -13,10 +10,11 @@ class Actuator:
         actuators_level = {}
 
 
-        def __init__(self, type, location):
+        def __init__(self, type, location , kappa ):
             self.type = type
             self.location = location
             self.id = type+location+str(Actuator.all_actuators)
+            self.kappa = kappa
             if self.id in list(Actuator.actuators_level.keys()):
                 print("Actuator ",self.id, " alreasy exist")
                 del self
