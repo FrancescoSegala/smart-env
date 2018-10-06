@@ -266,8 +266,7 @@ def main():
     print("Room "+_room_name+" created!")
     location = get_location( address )
     #default is "MyEnv"
-    #TOPIC_NAME_S = location+_room_name
-    TOPIC_NAME_S = "jacopino"
+    TOPIC_NAME_S = location+_room_name
     print("Use: ", TOPIC_NAME_S, " to bind the room to the server")
     producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
     http_server_host = config["HTTP_SERVER_HOST"]
