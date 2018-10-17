@@ -18,20 +18,20 @@ main method has to be launched when a new room is instantiated, so for each room
 '''
 
 #NOTE #1
-#this module create a file [in a hardwired path or a custom one] where there are couple k:V where k=[Actuator ID]  and v=[Actuator current value]
-#one on each line this because the value of the actuator shoul be bounded to the room created, is not advised to push the value "far" in a server
-#it will produce the same result, however this a mock for real sensors and in real application this value is bounded inside the actuator so close
-
-#NOTE #2
 #the method create_room start some sensors and actuators and push the sensor value to the kafka broker registered in _config_file_json
 
-#NOTE #3
+#NOTE #2
 #this module is almost self-contained, whenever a real env is available one should only write the connection to a kafka broker or message queue part.
+
+
+#NOTE #3
+#this module should start before the biding client-side of the environment, otherwise the binding function will fail
 
 ######################### CONSTANTS & ATD ######################################
 
 google_maps_url = "https://maps.googleapis.com/maps/api/geocode/json?address="
 _config_file_json = "config.json"
+binding_json = "binding.json"
 
 __n_sensors_default = 10
 __n_actuators_defalut = 5
@@ -45,6 +45,7 @@ kappa = {}
 
 x_lock = threading.Lock()
 
+#those ADT keeps record of the sensors and actuators active in the room
 room_sensors = {}
 room_actuators = {}
 
@@ -68,6 +69,33 @@ class RoomProducer:
 
 # HTTPRequestHandler class
 class actuatorHTTPrequestHandler(BaseHTTPRequestHandler):
+
+    #POST
+    def do_POST(self):
+        #path of the form: host/:user_id/:env_id
+        # Doesn't do anything with posted data
+        self.send_response(200)
+        # Send headers
+        self.send_header('Content-type','text/html')
+        self.end_headers()
+        path = self.path.split("/")
+        if len(path) < 3 :
+            self.wfile.write(bytes("invalid format", "utf8"))
+            return
+        user_id = path[1]
+        env_id = path[2]
+        #create the room stuff!!
+        with open(_config_file_json) as f:
+            config = json.load(f)
+
+        TOPIC_NAME_S = env_id
+        n_sensors = config["NSENSOR"]
+        n_actuators = config["NACTUATORS"]
+        location = config["LOCATION"]
+        producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
+        start_room( location, producer,user_id,env_id, n_sensors, n_actuators)
+        return
+
 
     # GET
     def do_GET(self):
@@ -158,6 +186,7 @@ def init_kappa():
     for k in config["KAPPA_VALUES"]:
         kappa[k.lower()] = config["KAPPA_VALUES"][k]
 
+
 def get_actuators_list(n_actuators , location ):
     for k in range(0,n_actuators):
         type = types_list[random.randint(0,n_actuators)% len(types_list)]
@@ -169,6 +198,24 @@ def update_actuator(id, value):
     with x_lock:
         room_actuators[id].set_value(float(value))
     return True
+
+
+def env_bind_endpoints_worker(user_id,env_id):
+    with open(_config_file_json) as f:
+        config = json.load(f)
+    with open(binding_json, "r") as jsonFile:
+        data = json.load(jsonFile)
+    actuator_ids = list(room_actuators.keys())
+    sensor_ids = list(room_sensors.keys())
+    for actuator in actuator_ids:
+        data["Endpoints"]["actuators"][actuator] = {"type":room_actuators[actuator].type, "location":room_actuators[actuator].location, "kappa":room_actuators[actuator].kappa}
+    for sensor in sensor_ids:
+        data["Endpoints"]["sensors"][sensor] = {"type":room_sensors[sensor].type, "location":room_sensors[sensor].location}
+    data["Topic"] = env_id
+    post_url = "http://"+config["RAILS_HOST"]+"/envs/"+env_id+"/endpoints?user_id="+user_id
+    r = requests.post(post_url, json=data )
+    print("Binding done")
+    return
 
 
 def send_sensor_data_worker( producer):
@@ -184,6 +231,7 @@ def send_sensor_data_worker( producer):
         i+=1
         i = i % n_sensors
 
+
 def http_actuator_server_worker(host, port):
   print('starting http actuator server...')
   # Choose port 8080, for port 80, which is normally used for a http server, you need root access
@@ -193,24 +241,28 @@ def http_actuator_server_worker(host, port):
   httpd.serve_forever()
 
 
-def start_room(location, producer, http_server_host ,
-                                    n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
+def statrt_room_http( http_server_host ):
+    host = http_server_host.split(":")
+    hostname = host[0]
+    port = int(host[1])
+    actuator_thread = threading.Thread(target=http_actuator_server_worker, args=(hostname,port,))
+    actuator_thread.start()
+    actuator_thread.join()
+
+
+def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
     init_kappa()
     get_sensors_list( n_sensors , location )
     get_actuators_list( n_actuators , location )
     actuator_ids = list(room_actuators.keys())
     sensor_thread = threading.Thread(target=send_sensor_data_worker, args=(producer,))
     sensor_thread.start()
-    host = http_server_host.split(":")
-    hostname = host[0]
-    port = int(host[1])
-    actuator_thread = threading.Thread(target=http_actuator_server_worker, args=(hostname,port,))
-    actuator_thread.start()
     mock_changes_thread = threading.Thread(target=mock_changes_worker, args=(actuator_ids,))
     mock_changes_thread.start()
-    sensor_thread.join()
-    actuator_thread.join()
-    mock_changes_thread.join()
+    bind_endpoints_thread = threading.Thread(target=env_bind_endpoints_worker ,args=(user_id,env_id,))
+    bind_endpoints_thread.start()
+    #sensor_thread.join()
+    #mock_changes_thread.join()
 
 ################################################################################
 
@@ -264,14 +316,17 @@ def main():
             _room_name =sys.argv[i+1]
     #start program
     print("Room "+_room_name+" created!")
-    location = get_location( address )
-    #default is "MyEnv"
-    TOPIC_NAME_S = location+_room_name
-    print("Use: ", TOPIC_NAME_S, " to bind the room to the server")
-    producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
-    http_server_host = config["HTTP_SERVER_HOST"]
-    start_room( location, producer, http_server_host, n_sensors, n_actuators)
+    with open(_config_file_json, "r") as jsonFile:
+        data = json.load(jsonFile)
 
+    data["LOCATION"] = get_location( address )
+    data["NSENSOR"] = n_sensors
+    data["NACTUATORS"] = n_actuators
+    with open(_config_file_json, "w") as jsonFile:
+        json.dump(data, jsonFile)
+
+    http_server_host = config["HTTP_SERVER_HOST"]
+    statrt_room_http(http_server_host)
 
 if __name__ == "__main__":
     main()

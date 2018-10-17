@@ -1,0 +1,7 @@
+{
+  "Endpoints": {
+  "actuators": {},
+  "sensors": {}
+    },
+    "Topic": "-LM6yE7IchI86HffRZA3", "Host": "localhost:8080"
+}
