@@ -93,7 +93,8 @@ class actuatorHTTPrequestHandler(BaseHTTPRequestHandler):
         n_actuators = config["NACTUATORS"]
         location = config["LOCATION"]
         producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
-        start_room( location, producer,user_id,env_id, n_sensors, n_actuators)
+        message = start_room( location, producer,user_id,env_id, n_sensors, n_actuators)
+        self.wfile.write(bytes(message, "utf8"))
         return
 
 
@@ -250,6 +251,18 @@ def statrt_room_http( http_server_host ):
     actuator_thread.join()
 
 
+def run_once(f):
+    def wrapper(*args, **kwargs):
+        if not wrapper.has_run:
+            wrapper.has_run = True
+            return f(*args, **kwargs)
+        else :
+            return "Room Already started"
+    wrapper.has_run = False
+    return wrapper
+
+
+@run_once
 def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
     init_kappa()
     get_sensors_list( n_sensors , location )
@@ -261,10 +274,14 @@ def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_def
     mock_changes_thread.start()
     bind_endpoints_thread = threading.Thread(target=env_bind_endpoints_worker ,args=(user_id,env_id,))
     bind_endpoints_thread.start()
+    return "Room Starting..."
     #sensor_thread.join()
     #mock_changes_thread.join()
 
 ################################################################################
+
+
+
 
 
 def print_usage():
