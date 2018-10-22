@@ -3,5 +3,5 @@
   "actuators": {},
   "sensors": {}
     },
-    "Topic": "-LM6yE7IchI86HffRZA3", "Host": "localhost:8080"
+    "Topic": "-LM6yE7IchI86HffRZA3", "Actuator_topic": ""
 }

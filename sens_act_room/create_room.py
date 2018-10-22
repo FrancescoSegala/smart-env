@@ -6,6 +6,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from kafka import KafkaProducer
+from kafka import KafkaConsumer
 from sensors import *
 from actuators import *
 
@@ -13,7 +14,7 @@ from actuators import *
 '''
 main method has to be launched when a new room is instantiated, so for each room there is a generated stream
 
-    usage : python3 create_room.py  -l #address [ [-s #sens -a #act]  || -n #room-name]
+    usage : usage: python3 create_room.py  -l #address -n or --name #name[ [-s #sens -a #act] ]
 
 '''
 
@@ -38,6 +39,7 @@ __n_actuators_defalut = 5
 min_time_w = 1
 max_time_w = 6
 minute = 60
+_RUN_THREADS = True
 
 
 types_list = ["air","temp","light"]
@@ -49,7 +51,68 @@ x_lock = threading.Lock()
 room_sensors = {}
 room_actuators = {}
 
-############################### Kafka Producer Class ###########################
+############################### Kafka Producer/Consumer Class ##################
+
+class RoomConsumer:
+    room_started = False
+
+    def __init__(self, _address, _topic, _room_name):
+        self._kafka_topic = _topic
+        self._room_name = _room_name
+        self._kafka_broker_adrress = _address
+        self.consumer = KafkaConsumer(bootstrap_servers=[_address])
+        self.consumer.subscribe([_topic])
+
+    def recv_messages(self):
+        for msg in self.consumer:
+            self.parse_message( msg.value )
+
+    def parse_message(self,message):
+        global _RUN_THREADS
+        message_d = message.decode("utf-8")
+        if message_d == "STOP_KAFKA_CONSUMER":
+            print("SHUTDOWN KABOOM ")
+            _RUN_THREADS = False
+            exit(1)
+            return
+        path = message_d.split("/")
+        if len(path) < 3 :
+            print("path format not valid")
+            return
+        if path[0] == "start_room" and not RoomConsumer.room_started:
+            user_id = path[1]
+            env_id = path[2]
+            #create the room stuff!!
+            with open(_config_file_json) as f:
+                config = json.load(f)
+            TOPIC_NAME_S = env_id
+            n_sensors = config["NSENSOR"]
+            n_actuators = config["NACTUATORS"]
+            location = config["LOCATION"]
+            producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
+            return_message = start_room( location,self._room_name, producer,user_id,env_id, n_sensors, n_actuators)
+            RoomConsumer.room_started = True
+            print(return_message)
+            return
+        if path[0] == "change_value":
+            id = path[1]
+            value = path[2]
+            if id not in list(room_actuators.keys()):
+                print(list(room_actuators.keys()))
+                print("invalid id")
+                return
+            return_message = "value Updated"
+            if update_actuator(id, value):
+                print("actuator ", id, " value changed to ", value)
+                # Send message back to client
+            else :
+                return_message = "cannot update id "+ id
+            print(return_message)
+            return
+
+
+
+
 
 class RoomProducer:
 
@@ -63,68 +126,6 @@ class RoomProducer:
         self.producer.send(self._kafka_topic,value=message_bytes)
         self.producer.flush()
 
-
-
-################################################################################
-
-# HTTPRequestHandler class
-class actuatorHTTPrequestHandler(BaseHTTPRequestHandler):
-
-    #POST
-    def do_POST(self):
-        #path of the form: host/:user_id/:env_id
-        # Doesn't do anything with posted data
-        self.send_response(200)
-        # Send headers
-        self.send_header('Content-type','text/html')
-        self.end_headers()
-        path = self.path.split("/")
-        if len(path) < 3 :
-            self.wfile.write(bytes("invalid format", "utf8"))
-            return
-        user_id = path[1]
-        env_id = path[2]
-        #create the room stuff!!
-        with open(_config_file_json) as f:
-            config = json.load(f)
-
-        TOPIC_NAME_S = env_id
-        n_sensors = config["NSENSOR"]
-        n_actuators = config["NACTUATORS"]
-        location = config["LOCATION"]
-        producer = RoomProducer(config["BROKER_HOST"],TOPIC_NAME_S)
-        message = start_room( location, producer,user_id,env_id, n_sensors, n_actuators)
-        self.wfile.write(bytes(message, "utf8"))
-        return
-
-
-    # GET
-    def do_GET(self):
-        #path of the form: host/:id/:value
-        # Send response status code
-        self.send_response(200)
-        # Send headers
-        self.send_header('Content-type','text/html')
-        self.end_headers()
-        path = self.path.split("/")
-        if len(path) < 3 :
-            self.wfile.write(bytes("invalid format", "utf8"))
-            return
-        id = path[1]
-        value = path[2]
-        if id not in list(room_actuators.keys()):
-            print(list(room_actuators.keys()))
-            self.wfile.write(bytes("invalid id", "utf8"))
-            return
-        message = "value Updated"
-        if update_actuator(id, value):
-            print("actuator ", id, " value changed to ", value)
-            # Send message back to client
-        else :
-            message = "cannot update id "+ id
-        # Write content as utf-8 data
-        self.wfile.write(bytes(message, "utf8"))
-        return
 
 
 
@@ -153,7 +154,7 @@ def mock_changes_worker(actuators_id_list):
     for id in actuators_id_list:
         with x_lock:
             prev[id] = room_actuators[id].get_value()
-    while True:
+    while _RUN_THREADS:
         print( "checking room changes..." )
         for id in actuators_id_list:
             with x_lock:
@@ -201,7 +202,7 @@ def update_actuator(id, value):
     return True
 
 
-def env_bind_endpoints_worker(user_id,env_id):
+def env_bind_endpoints_worker(user_id,env_id,_room_name,location):
     with open(_config_file_json) as f:
         config = json.load(f)
     with open(binding_json, "r") as jsonFile:
@@ -213,6 +214,7 @@ def env_bind_endpoints_worker(user_id,env_id):
     for sensor in sensor_ids:
         data["Endpoints"]["sensors"][sensor] = {"type":room_sensors[sensor].type, "location":room_sensors[sensor].location}
     data["Topic"] = env_id
+    data["Actuator_topic"] = _room_name+location
     post_url = "http://"+config["RAILS_HOST"]+"/envs/"+env_id+"/endpoints?user_id="+user_id
     r = requests.post(post_url, json=data )
     print("Binding done")
@@ -223,7 +225,7 @@ def send_sensor_data_worker( producer):
     sensor_ids = list(room_sensors.keys())
     n_sensors = len(sensor_ids)
     i=0
-    while True:
+    while _RUN_THREADS:
         with x_lock:
             producer.send_message( room_sensors[sensor_ids[i]].push_value() )
             #print ("sensor ", sensor_ids[i], "sent his data")
@@ -233,20 +235,16 @@ def send_sensor_data_worker( producer):
         i = i % n_sensors
 
 
-def http_actuator_server_worker(host, port):
-  print('starting http actuator server...')
-  # Choose port 8080, for port 80, which is normally used for a http server, you need root access
-  server_address = (host, port)
-  httpd = HTTPServer(server_address, actuatorHTTPrequestHandler)
-  print('running  http actuator server...')
-  httpd.serve_forever()
+def kafka_actuator_server_worker(_room_name, location):
+    topic_name = _room_name+location
+    with open(_config_file_json) as f:
+        config = json.load(f)
+    consumer = RoomConsumer(config["BROKER_HOST"],topic_name, _room_name)
+    consumer.recv_messages()
 
 
-def statrt_room_http( http_server_host ):
-    host = http_server_host.split(":")
-    hostname = host[0]
-    port = int(host[1])
-    actuator_thread = threading.Thread(target=http_actuator_server_worker, args=(hostname,port,))
+def start_room_receiver( _room_name, location ):
+    actuator_thread = threading.Thread(target=kafka_actuator_server_worker, args=(_room_name, location,))
     actuator_thread.start()
     actuator_thread.join()
 
@@ -263,7 +261,7 @@ def run_once(f):
 
 
 @run_once
-def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
+def start_room(location,_room_name, producer , user_id, env_id, n_sensors = __n_sensors_default , n_actuators = __n_actuators_defalut ):
     init_kappa()
     get_sensors_list( n_sensors , location )
     get_actuators_list( n_actuators , location )
@@ -272,7 +270,7 @@ def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_def
     sensor_thread.start()
     mock_changes_thread = threading.Thread(target=mock_changes_worker, args=(actuator_ids,))
     mock_changes_thread.start()
-    bind_endpoints_thread = threading.Thread(target=env_bind_endpoints_worker ,args=(user_id,env_id,))
+    bind_endpoints_thread = threading.Thread(target=env_bind_endpoints_worker ,args=(user_id,env_id,_room_name,location,))
     bind_endpoints_thread.start()
     return "Room Starting..."
     #sensor_thread.join()
@@ -282,10 +280,8 @@ def start_room(location, producer , user_id, env_id, n_sensors = __n_sensors_def
 
 
 
-
-
 def print_usage():
-    print("\nusage: python3 create_room.py  -l #address [ [-s #sens -a #act] -n or --name #room-name]\n")
+    print("\nusage: python3 create_room.py  -l #address -n or --name #name[ [-s #sens -a #act] ]\n")
 
 
 def is_int(value):
@@ -298,7 +294,7 @@ def is_int(value):
 
 def main():
     #command line parsing
-    if "-l" not in sys.argv:
+    if "-l" not in sys.argv and ("-n" not in sys.argv or "--name" not in sys.argv) :
         print_usage()
         return
     n_sensors=__n_sensors_default
@@ -307,7 +303,6 @@ def main():
     #take config params
     with open(_config_file_json) as f:
         config = json.load(f)
-    _room_name = config["ROOM_NAME"]
     for i in range(1,len(sys.argv)):
         param = sys.argv[i]
         if param == "-s" :
@@ -332,18 +327,20 @@ def main():
         if param == "-n" or param == "--name":
             _room_name =sys.argv[i+1]
     #start program
-    print("Room "+_room_name+" created!")
     with open(_config_file_json, "r") as jsonFile:
         data = json.load(jsonFile)
 
-    data["LOCATION"] = get_location( address )
+    location = get_location( address )
+
+    data["LOCATION"] = location
     data["NSENSOR"] = n_sensors
     data["NACTUATORS"] = n_actuators
     with open(_config_file_json, "w") as jsonFile:
         json.dump(data, jsonFile)
 
-    http_server_host = config["HTTP_SERVER_HOST"]
-    statrt_room_http(http_server_host)
+    print("Room "+_room_name+" created!")
+    print("Topic "+_room_name+location+" created, waiting...")
+    start_room_receiver(_room_name,location)
 
 if __name__ == "__main__":
     main()
