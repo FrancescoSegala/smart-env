@@ -281,7 +281,7 @@ def start_room(location,_room_name, producer , user_id, env_id, n_sensors = __n_
 
 
 def print_usage():
-    print("\nusage: python3 create_room.py  -l #address -n or --name #name[ [-s #sens -a #act] ]\n")
+    print("\nusage: python3 create_room.py  -l #address -n or --name #name [ [-s #sens -a #act] ]\n")
 
 
 def is_int(value):
@@ -294,7 +294,7 @@ def is_int(value):
 
 def main():
     #command line parsing
-    if "-l" not in sys.argv and ("-n" not in sys.argv or "--name" not in sys.argv) :
+    if "-l" not in sys.argv or ("-n" not in sys.argv and "--name" not in sys.argv) :
         print_usage()
         return
     n_sensors=__n_sensors_default
